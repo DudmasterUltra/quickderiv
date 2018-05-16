@@ -124,6 +124,11 @@ class State:
         return self.label
 
 class MenuState(State):
+    QUALITY_HIGH = 'Quality: High'
+    QUALITY_LOW = 'Quality: Low'
+    MUSIC_ON = 'Music: ON'
+    MUSIC_OFF = 'Music: OFF'
+    
     def __init__(self, resolution, audio):
         State.__init__(self, 'Menu', None, audio)
         self.title_overlay = pygame.transform.scale(
@@ -133,7 +138,10 @@ class MenuState(State):
             pygame.image.load(getfile('quickderiv-title-gradient.png')),
             (resolution[0], int(194 * (resolution[1] / 720)))).convert_alpha()
         self.fade = Fade(resolution)
-        self.state_options = [PlayingState(self, resolution, self.audio), self.previous_state]
+        self.state_options = [PlayingState(self, resolution, self.audio),
+                              self.QUALITY_HIGH,
+                              self.MUSIC_ON,
+                              self.previous_state]
         self.initialize()
 
     def initialize(self):
@@ -141,15 +149,37 @@ class MenuState(State):
         self.menu_offset = 0
         self.modtick = 0
         self.closing = False
+        self.update_state_options()
         self.fade.reset()
+
+    def update_state_options(self):
+        self.state_options[1] = self.QUALITY_LOW if self.state_options[0].low_graphics\
+                                else self.QUALITY_HIGH
+        self.state_options[2] = self.MUSIC_ON if pygame.mixer.music.get_volume() == MUSIC_VOLUME\
+                                else self.MUSIC_OFF
+
+    def get_selection(self):
+        return self.state_options[self.selection]
         
     def update(self, events, screen, width, height):
+        selected_item = self.get_selection()
+        
         if not self.closing:
             for event in events:
                 if event.type == pygame.KEYDOWN:
                     self.audio.select.play()
                     if event.key == pygame.K_RETURN:
-                        self.closing = True
+                        if selected_item in (self.QUALITY_HIGH, self.QUALITY_LOW):
+                            self.state_options[0].low_graphics = not self.state_options[0].low_graphics
+                            self.update_state_options()
+                        elif selected_item == self.MUSIC_ON:
+                            pygame.mixer.music.set_volume(0)
+                            self.update_state_options()
+                        elif selected_item == self.MUSIC_OFF:
+                            pygame.mixer.music.set_volume(MUSIC_VOLUME)
+                            self.update_state_options()
+                        else:
+                            self.closing = True
                     elif event.key == pygame.K_UP:
                         self.selection = (self.selection - 1) % len(self.state_options)
                     elif event.key == pygame.K_DOWN:
@@ -161,15 +191,16 @@ class MenuState(State):
         screen.fill(BACKGROUND_COLOR)
         screen.blit(self.title_gradient, (0, int(263 * (height / 720))))
 
+        selected_str = str(selected_item) if selected_item is not None else 'Exit'
         sine = math.sin(self.modtick) * 5
-        ptext.draw('>          ',
+        ptext.draw(f'>  {2 * len(selected_str) * " "}',
                    fontname=disco_dech_chrome,
                    fontsize=90,
                    strip=False,
                    color=FOREGROUND_COLOR,
                    center=(half_width - sine, half_height),
                    surf=screen)
-        ptext.draw('          <',
+        ptext.draw(f'{2 * len(selected_str) * " "}  <',
                    fontname=disco_dech_chrome,
                    fontsize=90,
                    strip=False,
@@ -189,7 +220,9 @@ class MenuState(State):
         if self.closing:
             self.fade.fade_out()
             if self.fade.is_complete():
-                return self.state_options[self.selection]
+                if selected_item is not None:
+                    selected_item.initialize()
+                return selected_item
         else:
             self.fade.fade_in()
 
@@ -298,8 +331,9 @@ class PlayingState(State):
         State.__init__(self, 'Play', previous_state, audio)
         self.stars = list()
         self.lines = list()
+        self.low_graphics = False
         self.inputbox = pygame_textinput.TextInput(
-            before_string='y\' = ',
+            before_string="y' = ",
             cursor_color=WHITE,
             text_color=WHITE)
         self.fade = Fade(resolution)
@@ -358,7 +392,7 @@ class PlayingState(State):
             self.inputbox.clear_text()
             if entered == self.questions[-1].y_prime:
                 self.score += 1
-                logger.info(f'Answer correct: y\' = {self.questions[-1][1]}')
+                logger.info(f"Answer correct: y' = {self.questions[-1][1]}")
                 self.questions.append(None)
                 self.next_time = self._make_next_time(self.question_length)
                 logger.info(f'Timer reset to {self.question_length} seconds')
@@ -370,7 +404,7 @@ class PlayingState(State):
                 self.audio.bad.play()
 
         if not self.closing and not self.opening and self.next_time < datetime.now():
-            logger.info(f'Timed out, the correct answer was: y\' = {self.questions[-1][1]}')
+            logger.info(f"Timed out, the correct answer was: y' = {self.questions[-1][1]}")
             self.closing = True
 
         if not self.questions[-1]:
@@ -402,7 +436,7 @@ class PlayingState(State):
             line.update(height, correct_delta)
 
         # Y grid
-        for i in range(-width * 5000, half_width, 1000):
+        for i in range(-width * 100, half_width, 1000):
             pygame.draw.line(screen, FOREGROUND_COLOR, (half_width, half_height), (i, height))
             pygame.draw.line(screen, FOREGROUND_COLOR,
                              (half_width, half_height), (width - i, height))
@@ -415,14 +449,16 @@ class PlayingState(State):
             self.next_time - datetime.now()).total_seconds() / self.question_length
         screen.fill(FOREGROUND_COLOR, pygame.Rect(0, height - 10, int(bar_length), 10))
 
-        # Question 'glitchy' teext
-        for i in range(3):
-            ptext.draw(f'y = {self.questions[-1].y}',
-                       midtop=(half_width + random.randint(-5, 5),
-                               (half_height / 2) + random.randint(-5, 5)),
-                       alpha=0.2,
-                       fontsize=54,
-                       surf=screen)
+        # Question 'glitchy' text
+        if not self.low_graphics:
+            for i in range(3):
+                ptext.draw(f'y = {self.questions[-1].y}',
+                           midtop=(half_width + random.randint(-5, 5),
+                                   (half_height / 2) + random.randint(-5, 5)),
+                           alpha=0.2,
+                           fontsize=54,
+                           surf=screen)
+                
         # Question text
         ptext.draw(f'y = {self.questions[-1].y}',
                    midtop=(half_width, half_height / 2),
@@ -439,7 +475,8 @@ class PlayingState(State):
         screen.blit(intext, intext.get_rect(center=(width / 2, height / 2 - 30)))
 
         # Add stars
-        for i in range(int(2 * max(4 - correct_delta.total_seconds(), 0))):
+        for i in range(int((0.5 if self.low_graphics else 2) *
+                           max(4 - correct_delta.total_seconds(), 0))):
             x_speed = random.uniform(-40, 40)
             y_speed = random.uniform(2, 10)
             self.stars.append(Star(half_width,
@@ -476,10 +513,10 @@ def play(resolution=(1080, 720), flags=0):
     pygame.key.set_repeat(100, 100)
     clock = pygame.time.Clock()
     audio = Audio()
-    state = MenuState(resolution, audio)
     pygame.mixer.music.load(blood_dragon_theme)
     pygame.mixer.music.set_volume(MUSIC_VOLUME)
     pygame.mixer.music.play(-1)
+    state = MenuState(resolution, audio)
     logger.info('Game started')
     while state:
         events = pygame.event.get()
