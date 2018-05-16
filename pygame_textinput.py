@@ -39,7 +39,7 @@ class TextInput:
         self.font_size = font_size
         self.before_string = before_string
         self.input_string = str() # Inputted text
-        self.font_object = font_object or pygame.font.Font(pygame.font.match_font(''), font_size)
+        self.font_object = font_object or pygame.font.Font(None, font_size)
 
         # Text-surface will be created during the first update call:
         self.surface = pygame.Surface((1, 1))
